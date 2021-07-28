@@ -4,7 +4,7 @@
 
 # modify-tcp
 
-A lightweight CLI tool for modifying TCP data on the fly, without any proxies or virtual machines. The program is built upon [libnetfilter_queue](https://www.netfilter.org/projects/libnetfilter_queue)
+A lightweight CLI tool for modifying TCP data on the fly, without needing any proxies or virtual machines. The program is built upon [libnetfilter_queue](https://www.netfilter.org/projects/libnetfilter_queue) and supports intercepting requests and responses for arbitrary connections on the specified network interface. The CLI tool focuses on enabling the insertion of Javascript into inbound HTTP and WebSocket responses, with support for various encodings.
 
 ## Overview
 
