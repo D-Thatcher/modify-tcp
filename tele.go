@@ -14,10 +14,10 @@ import (
 	// "time"
 )
 
-var xss string = `fetch('https://api.weather.gov/alerts/active')`
+// var xss string = `fetch('https://api.weather.gov/alerts/active')`
 
 // var xss string = `fetch("https://api.weather.gov/alerts/active").then(function(r){return r.json();}).then(function(j){console.log("EXECUTED REQUEST",j)});`
-// var xss string = `console.log('Hello from modify-tcp!')`
+var xss string = `console.log('Hello from modify-tcp!')`
 
 // Keep the websocket script well below the chunk size threshold of 127 (websocket chunking is not currently handled in the project)
 // var wsxss string = `<img id="photo" onerror="console.log('Hello from modify-tcp!')" src="image.jpg" width="1" height="1"/>`
@@ -46,6 +46,7 @@ type Queue struct {
 	queue *nfqueue.Queue
 }
 
+// FailOpen flag will make it non-blocking if the queue overflows
 func NewQueue(id uint16) *Queue {
 	q := &Queue{
 		id: id,
@@ -53,7 +54,7 @@ func NewQueue(id uint16) *Queue {
 	queueCfg := &nfqueue.QueueConfig{
 		MaxPackets: uint32(*maxPacketsInQueue),
 		BufferSize: uint32(*queueBufferSize),
-		QueueFlags: []nfqueue.QueueFlag{nfqueue.FailOpen}, // non-blocking if the queue overflows
+		QueueFlags: []nfqueue.QueueFlag{nfqueue.FailOpen},
 	}
 	q.queue = nfqueue.NewQueue(q.id, q, queueCfg)
 	return q
@@ -69,11 +70,12 @@ func (q *Queue) Stop() error {
 	return q.queue.Stop()
 }
 
+// Keep it stateless; another method could have already assigned and modified the data
 func acceptableWebSocketUpgrade(tcp *layers.TCP, data *[]byte, strData *string) (doInject bool) {
 	if tcp == nil || tcp.SrcPort != 80 {
 		return false
 	}
-	if len(*data) == 0 { // Keep it stateless; another method could have already assigned and modified the data
+	if len(*data) == 0 {
 		*data = tcp.LayerPayload()
 		*strData = string(*data)
 	}
@@ -100,11 +102,12 @@ func getWebSocketId(packet *gopacket.Packet, tcp *layers.TCP) (wsId string) {
 	return idWebSocket
 }
 
+// Keep it stateless; another method could have already assigned and modified the data
 func acceptableWebSocketFrame(packet *gopacket.Packet, tcp *layers.TCP, data *[]byte, strData *string) (doInject bool) {
 	if tcp == nil || tcp.SrcPort != 80 {
 		return false
 	}
-	if len(*data) == 0 { // Keep it stateless; another method could have already assigned and modified the data
+	if len(*data) == 0 {
 		*data = tcp.LayerPayload()
 		*strData = string(*data)
 	}
@@ -116,11 +119,12 @@ func acceptableWebSocketFrame(packet *gopacket.Packet, tcp *layers.TCP, data *[]
 	return present
 }
 
+// Keep it stateless; another method could have already assigned and modified the data
 func acceptableHTTP(tcp *layers.TCP, data *[]byte, strData *string) (doInject bool) {
 	if tcp == nil || tcp.SrcPort != 80 {
 		return false
 	}
-	if len(*data) == 0 { // Keep it stateless; another method could have already assigned and modified the data
+	if len(*data) == 0 {
 		*data = tcp.LayerPayload()
 		*strData = string(*data)
 	}
@@ -166,12 +170,20 @@ func (q *Queue) Handle(p *nfqueue.Packet) {
 		if acceptableWebSocketUpgrade(tcp, &data, &strData) {
 			var strct struct{}
 			idWebSocket := getWebSocketId(&packet, tcp)
-			fmt.Printf("Websocket upgrade with id %v \n", string(idWebSocket))
 			webSocketMap[idWebSocket] = strct
 
 		} else if acceptableHTTP(tcp, &data, &strData) {
 			printLn("Injecting Javascript into HTTP response...")
-			injectedCorrectly := httpDataHandler(&data, strings.Contains(strData, "gzip"), &xss, *verbose)
+			// Should isolate just the content-encoding value from the header, but this'll do for now
+			encoding := ""
+			chunked := strings.Contains(strData, "chunked")
+
+			if strings.Contains(strData, "gzip") {
+				encoding = "gzip"
+			} else if strings.Contains(strData, "deflate") {
+				encoding = "deflate"
+			}
+			injectedCorrectly := httpDataHandler(&data, &encoding, &xss, &chunked, *verbose)
 			if !injectedCorrectly {
 				p.Accept()
 				return
@@ -185,7 +197,6 @@ func (q *Queue) Handle(p *nfqueue.Packet) {
 				delete(webSocketMap, idWebSocket)
 
 			} else if textOrBinaryWS(opCode) {
-				// ln := calcContentLengthWS(&data)
 				var modData []byte
 				data[1] = byte(len(wsxss) + len(data) - 2)
 				modData = append(data, []byte(wsxss)...)
@@ -241,11 +252,11 @@ func main() {
 
 	flag.Parse()
 	if len(*iface) == 0 {
-		fmt.Println("A network interface must be flagged. To show available interfaces on Ubuntu 20.04 run `ip addr`")
+		fmt.Println("A network interface must be flagged. To show available interfaces run `ip addr`")
 		os.Exit(1)
 	}
 	if strings.Contains(*script, "<script>") {
-		fmt.Println("Script elements will be automatically added. Do not include them in the --javascript parameter")
+		fmt.Println("Script elements will be automatically added where applicable. Do not include them in the --javascript parameter")
 		os.Exit(1)
 	}
 	queueNumberInt := uint16(*queueNumber)

