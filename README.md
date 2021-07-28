@@ -8,7 +8,7 @@ A lightweight CLI tool for modifying TCP data on the fly, without any proxies or
 
 ## Overview
 
-Assuming your device is [set up](<#getting-started>), run
+Assuming your device is [set up](#getting-started), run
 ```
 $ sudo ./modify-tcp -handle-iptables -iface <interface>
 ```
