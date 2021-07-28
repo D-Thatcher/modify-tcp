@@ -32,7 +32,6 @@ $ curl http://www.climvis.org/content/global.htm
 If you queried from a browser, you'll notice a message in the console `Hello from modify-tcp!`. To see the WebSocket in action, open up the [testSocket.html](doc/assets/testSocket.html) file in a browser. It will ping ws://echo.websocket.org/ and you'll also notice the same message in the console `Hello from modify-tcp!`
 
 
-
 ## Supports:
 * HTTP response intercepts and script insertions
 * WebSocket response intercepts and script insertions
@@ -40,7 +39,6 @@ If you queried from a browser, you'll notice a message in the console `Hello fro
 * IPv4 & IPv6 over wireless or ethernet
 * Multiple content encodings, such as gzip, deflate and chunked - Note this feature is still in testing
  
-
 
 ## Getting started:
 * Install libnetfilter `$ apt-get install libnetfilter-queue-dev`
