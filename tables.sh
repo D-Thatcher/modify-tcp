@@ -8,3 +8,8 @@ sudo iptables -D INPUT -i wlp0s20f3 -j NFQUEUE --queue-num 1
 
 sudo /home/ubuntu18/miniconda3/bin/python3 main.py
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j NFQUEUE --queue-num 1
+sudo ./modify-tcp -handle-iptables -override-ufw -iface wlp0s20f3
+// Check 1
+//http://www.glyfac.buffalo.edu/mib/course/Figures/UWGBDutch/EarthSC-202VisualsIndex.HTM
+
+// gzip http://www.climvis.org/content/global.htm
