@@ -46,7 +46,6 @@ If you queried from a browser, you'll notice a message in the console `Hello fro
 * If you prefer to manually change it, here's the default rule that's used in modify-tcp: `$ iptables -A INPUT -i <IFACE> -j NFQUEUE --queue-num 1`
 * Start the program `$ sudo ./modify-tcp -handle-iptables -iface <IFACE>`
 
-
 ## Using the CLI tool
 
     Usage of ./modify-tcp:
