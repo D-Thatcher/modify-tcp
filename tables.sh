@@ -7,5 +7,4 @@ sudo ufw enable
 sudo iptables -D INPUT -i wlp0s20f3 -j NFQUEUE --queue-num 1
 
 sudo /home/ubuntu18/miniconda3/bin/python3 main.py
-
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j NFQUEUE --queue-num 1
